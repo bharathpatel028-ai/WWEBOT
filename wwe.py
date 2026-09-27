@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-HOMIES WWE CYBER-BRAWL BOT
-- 1v1 Grudge Matches
-- 2v2 Tag Team Warfare (with live Tag mechanics)
-- 4-8 Player Royal Rumble (last wrestler standing)
-- Visual Retro HP Bars & Announcer Commentary
-- Embedded Keepalive HTTP Server for 24/7 Free Cloud Hosting (Render/Koyeb)
+🏆 HOMIES WWE CYBER-BRAWL BOT (24/7 CLOUD EDITION)
+- Clean, spacious visual layout with neon emojis & dividers
+- Auto-registers players instantly (never blocks with 'DM /start first')
+- Preserves all stats across updates
+- 1v1 Grudge, 2v2 Tag Team, & 4-8 Player Royal Rumble
+- Built-in 24/7 Keepalive HTTP Server for Render
 """
 
 import os
@@ -33,7 +33,7 @@ try:
 except Exception:
     PIL_AVAILABLE = False
 
-# ---------------- CONFIG ----------------
+# ---------------- CONFIG & SECRETS ----------------
 DEFAULT_TOKEN = "8949576090:AAEtYg8073-yr4lpRp-6sfaEXX3kEssRywc"
 BOT_TOKEN = os.getenv("BOT_TOKEN", DEFAULT_TOKEN)
 PERSISTENT_DIR = os.getenv("PERSISTENT_DIR", None)
@@ -62,6 +62,8 @@ RUMBLE_MIN_PLAYERS = 4
 RUMBLE_MAX_PLAYERS = 8
 RUMBLE_HP = 200
 
+DIVIDER = "━━━━━━━━━━━━━━━━━━━━━━"
+
 MOVES = {
     "punch": {"dmg": 10, "emoji": "🥊", "name": "Heavy Punch"},
     "kick": {"dmg": 18, "emoji": "🦵", "name": "Big Boot"},
@@ -69,10 +71,10 @@ MOVES = {
     "dropkick": {"dmg": 34, "emoji": "🚀", "name": "Dropkick"},
     "suplex": {"dmg": 48, "emoji": "🌪️", "name": "German Suplex"},
     "rko": {"dmg": 60, "emoji": "⚡", "name": "Outta Nowhere RKO"},
-    "reversal": {"dmg": 0, "emoji": "🛡️", "name": "Counter / Reversal"},
+    "reversal": {"dmg": 0, "emoji": "🛡️", "name": "Counter Reversal"},
 }
 
-# ---------------- STATS PERSISTENCE ----------------
+# ---------------- PERMANENT STATS STORAGE ----------------
 try:
     if os.path.exists(STATS_FILE):
         with open(STATS_FILE, "r", encoding="utf-8") as f:
@@ -80,7 +82,7 @@ try:
     else:
         user_stats = {}
 except Exception:
-    logger.exception("Failed to load stats file; starting with empty stats.")
+    logger.exception("Failed to load stats; starting clean.")
     user_stats = {}
 
 def save_stats():
@@ -91,44 +93,62 @@ def save_stats():
         with open(STATS_FILE, "w", encoding="utf-8") as f:
             json.dump(user_stats, f, ensure_ascii=False, indent=2)
     except Exception:
-        logger.exception("Failed to save stats")
+        logger.exception("Failed to save stats.")
 
 for k, v in list(user_stats.items()):
     v.setdefault("draws", 0)
 
-# ---------------- IN-MEMORY STATE ----------------
+def ensure_user(user) -> str:
+    """Auto-registers any player instantly so no one is blocked from playing."""
+    uid = str(user.id)
+    if uid not in user_stats or not user_stats[uid].get("name"):
+        fallback = user.first_name or user.username or f"Superstar_{user.id}"
+        clean_name = re.sub(r'[^\w\s-]', '', fallback).strip()[:MAX_NAME_LENGTH]
+        if not clean_name:
+            clean_name = f"Wrestler_{str(user.id)[-4:]}"
+        user_stats.setdefault(uid, {})
+        user_stats[uid].update({
+            "name": clean_name,
+            "wins": user_stats[uid].get("wins", 0),
+            "losses": user_stats[uid].get("losses", 0),
+            "draws": user_stats[uid].get("draws", 0),
+            "specials_used": user_stats[uid].get("specials_used", 0),
+            "specials_successful": user_stats[uid].get("specials_successful", 0),
+        })
+        save_stats()
+    return user_stats[uid]["name"]
+
+# ---------------- IN-MEMORY ACTIVE MATCHES ----------------
 lobbies: Dict[int, Dict] = {}
 games: Dict[int, Dict] = {}
 rumble_games: Dict[int, Dict] = {}
 tag_games: Dict[int, Dict] = {}
 rumble_target_choices: Dict[str, Dict] = {}
 
-# ---------------- THEME & VISUAL HELPERS ----------------
+# ---------------- VISUAL RETRO HP BAR ----------------
 def hp_bar(current: int, max_hp: int = MAX_HP, length: int = 10) -> str:
-    """Returns a visual retro health bar"""
     current = max(0, current)
     ratio = current / max_hp
     filled = int(round(ratio * length))
     empty = max(0, length - filled)
-    if ratio > 0.55:
-        icon = "🟩"
-    elif ratio > 0.25:
-        icon = "🟨"
+    if ratio > 0.50:
+        bar_char = "🟩"
+    elif ratio > 0.20:
+        bar_char = "🟨"
     else:
-        icon = "🟥"
-    return f"{icon * filled}{'⬛' * empty} <b>{current}/{max_hp} HP</b>"
+        bar_char = "🟥"
+    return f"{bar_char * filled}{'⬛' * empty}  <b>{current} / {max_hp} HP</b>"
 
 def crowd_hype() -> str:
     return random.choice([
-        "🔥 <i>The arena roof blows off with roaring cheers!</i>",
-        "📣 <i>Fans are standing on their chairs in disbelief!</i>",
-        "😱 <i>HOLY SHIT! HOLY SHIT! echoes through the crowd!</i>",
-        "⚡ <i>Camera flashes illuminate the electric ringside!</i>",
-        "🎙️ <i>ANNOUNCER: 'BAH GAWD! WHAT A MOVE!'</i>"
+        "🔥 <i>The arena roof blows off with thunderous cheers!</i>",
+        "📣 <i>Fans are on their feet, screaming at ringside!</i>",
+        "😱 <i>HOLY SHIT! echoes throughout the packed arena!</i>",
+        "⚡ <i>Camera flashes light up the square circle!</i>",
+        "🎙️ <i>ANNOUNCER: 'BAH GAWD! HE HIT HIM WITH EVERYTHING!'</i>"
     ])
 
 async def safe_send(func, *args, **kwargs):
-    """Robust wrapper for sending/editing messages."""
     try:
         return await func(*args, **kwargs)
     except TimedOut:
@@ -151,11 +171,7 @@ async def safe_send(func, *args, **kwargs):
         logger.exception("Unexpected send error")
     return None
 
-async def send_short_restriction_dm(context: ContextTypes.DEFAULT_TYPE, user_id: int):
-    msg = "— <b>Use another move — you can't use this special or reversal consecutively</b>"
-    await safe_send(context.bot.send_message, chat_id=user_id, text=msg, parse_mode=PARSE_MODE)
-
-# ---------------- PIL CARD GENERATORS ----------------
+# ---------------- HIGH-DEF TRADING CARD GENERATOR ----------------
 def find_font_pair():
     if not PIL_AVAILABLE:
         return (None, None)
@@ -168,7 +184,7 @@ def find_font_pair():
     for p in candidates:
         if os.path.exists(p):
             try:
-                return (ImageFont.truetype(p, 54), ImageFont.truetype(p, 26))
+                return (ImageFont.truetype(p, 48), ImageFont.truetype(p, 24))
             except Exception:
                 continue
     try:
@@ -180,12 +196,18 @@ def create_stats_image(name: str, stats: Dict) -> bytes:
     if not PIL_AVAILABLE:
         raise RuntimeError("Pillow not available")
     title_font, body_font = find_font_pair()
-    W, H = 850, 420
-    img = Image.new("RGB", (W, H), color=(15, 12, 28))
+    W, H = 840, 420
+    img = Image.new("RGB", (W, H), color=(14, 17, 28))
     draw = ImageDraw.Draw(img)
-    draw.rectangle(((0, 0), (W, 90)), fill=(255, 69, 0))
-    draw.text((30, 20), "WWE CAREER PROFILE", font=title_font, fill=(255, 255, 255))
-    draw.text((40, 115), f"Wrestler: {name}", font=title_font, fill=(255, 215, 0))
+
+    # Gold and crimson frame
+    draw.rectangle(((0, 0), (W, 85)), fill=(200, 16, 46))
+    draw.line(((0, 85), (W, 85)), fill=(255, 215, 0), width=4)
+    draw.text((30, 20), "🏆 WWE CHAMPIONSHIP ROSTER", font=title_font, fill=(255, 255, 255))
+
+    # Name
+    draw.text((40, 105), f"⭐ SUPERSTAR: {name.upper()}", font=title_font, fill=(255, 215, 0))
+
     wins = stats.get("wins", 0)
     losses = stats.get("losses", 0)
     draws = stats.get("draws", 0)
@@ -193,17 +215,25 @@ def create_stats_image(name: str, stats: Dict) -> bytes:
     win_pct = round((wins / total) * 100, 1) if total else 0.0
     sp_u = stats.get("specials_used", 0)
     sp_s = stats.get("specials_successful", 0)
-    lines = [
-        f"🏆 Wins: {wins}    💀 Losses: {losses}    🤝 Draws: {draws}",
-        f"📊 Win Percentage: {win_pct}%",
-        f"⚡ Specials Landed: {sp_s} / {sp_u} uses",
-        "🎖️ Division: Heavyweight Championship Roster"
-    ]
-    y = 190
-    for ln in lines:
-        draw.text((40, y), ln, font=body_font, fill=(230, 230, 230))
-        y += 40
-    draw.text((300, H - 40), "★ WWE CYBER ARENA BRAWLER ★", font=body_font, fill=(120, 120, 150))
+
+    # Stat cards
+    y = 180
+    draw.rectangle(((40, y), (260, y + 90)), fill=(22, 28, 48), outline=(0, 255, 180), width=2)
+    draw.text((60, y + 15), "VICTORIES", font=body_font, fill=(160, 180, 210))
+    draw.text((60, y + 45), f"{wins} WINS", font=title_font, fill=(0, 255, 180))
+
+    draw.rectangle(((300, y), (520, y + 90)), fill=(22, 28, 48), outline=(255, 75, 75), width=2)
+    draw.text((320, y + 15), "DEFEATS", font=body_font, fill=(160, 180, 210))
+    draw.text((320, y + 45), f"{losses} LOSS", font=title_font, fill=(255, 80, 80))
+
+    draw.rectangle(((560, y), (780, y + 90)), fill=(22, 28, 48), outline=(255, 200, 0), width=2)
+    draw.text((580, y + 15), "WIN RATE", font=body_font, fill=(160, 180, 210))
+    draw.text((580, y + 45), f"{win_pct}%", font=title_font, fill=(255, 215, 0))
+
+    footer = f"⚡ Specials Landed: {sp_s} / {sp_u}  •  Draws: {draws}"
+    draw.text((45, 300), footer, font=body_font, fill=(200, 210, 230))
+    draw.text((250, H - 40), "★ WWE CYBER ARENA 24/7 ★", font=body_font, fill=(100, 115, 145))
+
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
@@ -215,51 +245,52 @@ def create_leaderboard_image(entries: List[Tuple[str, int, int, int]]) -> bytes:
     title_font, body_font = find_font_pair()
     W = 850
     rows = max(3, len(entries))
-    H = 130 + rows * 44
-    img = Image.new("RGB", (W, H), color=(10, 14, 26))
+    H = 130 + rows * 48
+    img = Image.new("RGB", (W, H), color=(12, 16, 26))
     draw = ImageDraw.Draw(img)
-    draw.rectangle(((0, 0), (W, 85)), fill=(30, 144, 255))
-    draw.text((30, 18), "WWE HALL OF FAME", font=title_font, fill=(255, 255, 255))
+    draw.rectangle(((0, 0), (W, 85)), fill=(25, 118, 210))
+    draw.line(((0, 85), (W, 85)), fill=(0, 229, 255), width=4)
+    draw.text((30, 20), "👑 WWE HALL OF FAME — TOP 10", font=title_font, fill=(255, 255, 255))
     y = 110
     for i, (name, wins, losses, draws) in enumerate(entries, start=1):
         medal = "🥇 " if i == 1 else "🥈 " if i == 2 else "🥉 " if i == 3 else f"{i}. "
         draw.text((40, y), f"{medal}{name}", font=body_font, fill=(255, 255, 255))
         draw.text((W - 320, y), f"{wins}W - {losses}L - {draws}D", font=body_font, fill=(0, 255, 200))
-        y += 44
+        y += 48
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf.getvalue()
 
-# ---------------- KEYBOARD BUILDERS ----------------
+# ---------------- KEYBOARDS ----------------
 def build_1v1_move_keyboard(group_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🥊 Punch (10)", callback_data=f"move|{group_id}|punch"),
-            InlineKeyboardButton("🦵 Kick (18)", callback_data=f"move|{group_id}|kick"),
-            InlineKeyboardButton("💥 Slam (26)", callback_data=f"move|{group_id}|slam")
+            InlineKeyboardButton("🥊 Punch • 10", callback_data=f"move|{group_id}|punch"),
+            InlineKeyboardButton("🦵 Kick • 18", callback_data=f"move|{group_id}|kick"),
+            InlineKeyboardButton("💥 Slam • 26", callback_data=f"move|{group_id}|slam")
         ],
         [
-            InlineKeyboardButton("🚀 Dropkick (34)", callback_data=f"move|{group_id}|dropkick"),
-            InlineKeyboardButton("🌪️ Suplex (48)", callback_data=f"move|{group_id}|suplex"),
-            InlineKeyboardButton("⚡ RKO (60)", callback_data=f"move|{group_id}|rko")
+            InlineKeyboardButton("🚀 Dropkick • 34", callback_data=f"move|{group_id}|dropkick"),
+            InlineKeyboardButton("🌪️ Suplex • 48", callback_data=f"move|{group_id}|suplex"),
+            InlineKeyboardButton("⚡ RKO • 60", callback_data=f"move|{group_id}|rko")
         ],
         [
-            InlineKeyboardButton("🛡️ Reversal / Counter", callback_data=f"move|{group_id}|reversal")
+            InlineKeyboardButton("🛡️ Counter / Reversal", callback_data=f"move|{group_id}|reversal")
         ]
     ])
 
 def build_rumble_move_keyboard(group_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🥊 Punch (10)", callback_data=f"rumble_move|{group_id}|punch"),
-            InlineKeyboardButton("🦵 Kick (18)", callback_data=f"rumble_move|{group_id}|kick"),
-            InlineKeyboardButton("💥 Slam (26)", callback_data=f"rumble_move|{group_id}|slam")
+            InlineKeyboardButton("🥊 Punch • 10", callback_data=f"rumble_move|{group_id}|punch"),
+            InlineKeyboardButton("🦵 Kick • 18", callback_data=f"rumble_move|{group_id}|kick"),
+            InlineKeyboardButton("💥 Slam • 26", callback_data=f"rumble_move|{group_id}|slam")
         ],
         [
-            InlineKeyboardButton("🚀 Dropkick (34)", callback_data=f"rumble_move|{group_id}|dropkick"),
-            InlineKeyboardButton("🌪️ Suplex (48)", callback_data=f"rumble_move|{group_id}|suplex"),
-            InlineKeyboardButton("⚡ RKO (60)", callback_data=f"rumble_move|{group_id}|rko")
+            InlineKeyboardButton("🚀 Dropkick • 34", callback_data=f"rumble_move|{group_id}|dropkick"),
+            InlineKeyboardButton("🌪️ Suplex • 48", callback_data=f"rumble_move|{group_id}|suplex"),
+            InlineKeyboardButton("⚡ RKO • 60", callback_data=f"rumble_move|{group_id}|rko")
         ],
         [
             InlineKeyboardButton("🛡️ Reversal", callback_data=f"rumble_move|{group_id}|reversal")
@@ -269,14 +300,14 @@ def build_rumble_move_keyboard(group_id: int) -> InlineKeyboardMarkup:
 def build_tag_move_keyboard(group_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("🥊 Punch (10)", callback_data=f"tag_move|{group_id}|punch"),
-            InlineKeyboardButton("🦵 Kick (18)", callback_data=f"tag_move|{group_id}|kick"),
-            InlineKeyboardButton("💥 Slam (26)", callback_data=f"tag_move|{group_id}|slam")
+            InlineKeyboardButton("🥊 Punch • 10", callback_data=f"tag_move|{group_id}|punch"),
+            InlineKeyboardButton("🦵 Kick • 18", callback_data=f"tag_move|{group_id}|kick"),
+            InlineKeyboardButton("💥 Slam • 26", callback_data=f"tag_move|{group_id}|slam")
         ],
         [
-            InlineKeyboardButton("🚀 Dropkick (34)", callback_data=f"tag_move|{group_id}|dropkick"),
-            InlineKeyboardButton("🌪️ Suplex (48)", callback_data=f"tag_move|{group_id}|suplex"),
-            InlineKeyboardButton("⚡ RKO (60)", callback_data=f"tag_move|{group_id}|rko")
+            InlineKeyboardButton("🚀 Dropkick • 34", callback_data=f"tag_move|{group_id}|dropkick"),
+            InlineKeyboardButton("🌪️ Suplex • 48", callback_data=f"tag_move|{group_id}|suplex"),
+            InlineKeyboardButton("⚡ RKO • 60", callback_data=f"tag_move|{group_id}|rko")
         ],
         [
             InlineKeyboardButton("🔄 Tag Partner", callback_data=f"tag_move|{group_id}|tag"),
@@ -284,97 +315,60 @@ def build_tag_move_keyboard(group_id: int) -> InlineKeyboardMarkup:
         ]
     ])
 
-# ---------------- USER REGISTRATION & COMMANDS ----------------
+# ---------------- USER COMMANDS ----------------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private":
-        await safe_send(update.message.reply_text, "Please DM me /start to set your wrestler name.")
-        return
-    uid = str(update.effective_user.id)
-    if uid in user_stats and user_stats[uid].get("name"):
-        await safe_send(
-            update.message.reply_text,
-            f"🥊 Welcome back, superstar <b>{user_stats[uid]['name']}</b>!\n"
-            f"Use /stats to check your record or invite me to a group to brawl!",
-            parse_mode=PARSE_MODE
-        )
-        return
-    user_stats.setdefault(uid, {
-        "name": None, "wins": 0, "losses": 0, "draws": 0,
-        "specials_used": 0, "specials_successful": 0
-    })
-    save_stats()
-    context.user_data["awaiting_name"] = True
-    await safe_send(
-        update.message.reply_text,
-        f"⚡ <b>WELCOME TO WWE BRAWL!</b>\n\nReply with your ring name (max {MAX_NAME_LENGTH} chars):",
-        parse_mode=PARSE_MODE
+    name = ensure_user(update.effective_user)
+    msg = (
+        f"⚡ <b>WELCOME TO WWE CYBER-BRAWL!</b> ⚡\n"
+        f"{DIVIDER}\n\n"
+        f"🥊 <b>Your Ring Name:</b> <code>{name}</code>\n"
+        f"🏆 <b>Status:</b> Ready for Combat\n\n"
+        f"<b>Commands you can use:</b>\n"
+        f"• /startgame — Open 1v1 Grudge Match (in group)\n"
+        f"• /starttag — Open 2v2 Tag Team match (in group)\n"
+        f"• /startrumble — Open Royal Rumble 4-8 players (in group)\n"
+        f"• /stats — View your career card\n"
+        f"• /leaderboard — View Hall of Fame top 10\n"
+        f"• /startcareer &lt;name&gt; — Change your ring name\n\n"
+        f"{DIVIDER}"
     )
+    await safe_send(update.message.reply_text, msg, parse_mode=PARSE_MODE)
 
 async def cmd_startcareer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private":
-        await safe_send(update.message.reply_text, "Use /startcareer in DM to change your superstar name.")
-        return
+    args = context.args
     uid = str(update.effective_user.id)
-    user_stats.setdefault(uid, {
-        "name": None, "wins": 0, "losses": 0, "draws": 0,
-        "specials_used": 0, "specials_successful": 0
-    })
-    context.user_data["awaiting_name"] = True
-    await safe_send(update.message.reply_text, f"Enter your new superstar name (max {MAX_NAME_LENGTH} chars):")
-
-async def private_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private":
+    ensure_user(update.effective_user)
+    if not args:
+        await safe_send(update.message.reply_text, "Usage: <code>/startcareer &lt;NewName&gt;</code>", parse_mode=PARSE_MODE)
         return
-    uid = str(update.effective_user.id)
-    text = (update.message.text or "").strip()
-    if context.user_data.get("awaiting_name"):
-        name = text.strip()
-        if not name or len(name) > MAX_NAME_LENGTH:
-            await safe_send(update.message.reply_text, f"⚠️ Name must be 1 to {MAX_NAME_LENGTH} characters. Try again:")
-            return
-        taken = any(info.get("name") and info["name"].lower() == name.lower() for k, info in user_stats.items() if k != uid)
-        if taken:
-            await safe_send(update.message.reply_text, "⚠️ That superstar name is already taken! Pick another:")
-            return
-        user_stats.setdefault(uid, {})
-        user_stats[uid].update({"name": name, "wins": 0, "losses": 0, "draws": 0, "specials_used": 0, "specials_successful": 0})
-        save_stats()
-        context.user_data["awaiting_name"] = False
-        await safe_send(
-            update.message.reply_text,
-            f"🔥 <b>CONTRACT SIGNED!</b>\nYou are registered as <b>{name}</b>.\n"
-            f"Add me to a group and start brawling with /startgame, /starttag, or /startrumble!",
-            parse_mode=PARSE_MODE
-        )
-        return
-    await safe_send(update.message.reply_text, "Commands: /stats, /leaderboard, /help")
+    new_name = " ".join(args).strip()[:MAX_NAME_LENGTH]
+    user_stats[uid]["name"] = new_name
+    save_stats()
+    await safe_send(update.message.reply_text, f"🔥 <b>Ring name updated to:</b> <code>{new_name}</code>!", parse_mode=PARSE_MODE)
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = (
-        "⚡ <b>WWE CYBER-BRAWL — GAME MANUAL</b> ⚡\n\n"
-        "<b>🏟️ Match Modes:</b>\n"
-        "• /startgame — Open a 1v1 Grudge Match lobby\n"
-        "• /starttag — Open a 2v2 Tag Team match (4 wrestlers)\n"
-        "• /startrumble — Open a Royal Rumble lobby (4-8 wrestlers)\n"
-        "• /forfeit — Forfeit your active match (DM)\n"
-        "• /endmatch — Request a draw in group (participants only)\n\n"
-        "<b>🥊 Combat System:</b>\n"
-        "• Punch (10) | Kick (18) | Slam (26) | Dropkick (34)\n"
-        "• <b>Suplex (48) & RKO (60):</b> 4 uses per match. Cannot be spammed consecutively.\n"
-        "• <b>Reversal:</b> 3 uses per match. Reflects incoming damage back to the attacker!\n"
-        "• <b>Tag Team:</b> Legal man can tag partner at any time. Partner enters automatically if legal man is pinned!\n\n"
-        "<b>📊 Stats & Rankings:</b>\n"
-        "• /stats — View your career card\n"
-        "• /leaderboard — View Hall of Fame top 10\n"
-        "• /checkstats @name — Inspect another superstar's record"
+        f"📖 <b>WWE BRAWLER — RULEBOOK</b>\n"
+        f"{DIVIDER}\n\n"
+        f"<b>🏟️ Game Modes:</b>\n"
+        f"• <b>/startgame</b> — 1v1 Grudge match\n"
+        f"• <b>/starttag</b> — 2v2 Tag Team brawl\n"
+        f"• <b>/startrumble</b> — 4 to 8 Superstars Royal Rumble\n\n"
+        f"<b>🥊 Move List & Damage:</b>\n"
+        f"• 🥊 Punch [10]  • 🦵 Kick [18]  • 💥 Slam [26]\n"
+        f"• 🚀 Dropkick [34]  • 🌪️ Suplex [48]  • ⚡ RKO [60]\n"
+        f"• 🛡️ <b>Reversal:</b> Reflects 100% of damage back to the attacker!\n\n"
+        f"<b>⚠️ Restrictions:</b>\n"
+        f"• Specials (Suplex & RKO) max 4 per match.\n"
+        f"• Reversals max 3 per match.\n"
+        f"• You cannot spam the same special or reversal twice in a row.\n\n"
+        f"{DIVIDER}"
     )
     await safe_send(update.message.reply_text, msg, parse_mode=PARSE_MODE)
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = str(update.effective_user.id)
-    if uid not in user_stats or not user_stats[uid].get("name"):
-        await safe_send(update.message.reply_text, "You are not registered. DM /start to register.")
-        return
+    ensure_user(update.effective_user)
     info = user_stats[uid]
     if PIL_AVAILABLE:
         try:
@@ -386,16 +380,17 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         except Exception:
             pass
-    wins, losses, draws = info.get("wins", 0), info.get("losses", 0), info.get("draws", 0)
-    total = wins + losses + draws
-    pct = round((wins / total) * 100, 1) if total else 0.0
-    txt = (
-        f"🏆 <b>{info.get('name')}</b> — CAREER STATS\n"
-        f"• Record: {wins}W - {losses}L - {draws}D\n"
-        f"• Winrate: {pct}%\n"
-        f"• Specials: {info.get('specials_successful', 0)} landed"
+    w, l, d = info.get("wins", 0), info.get("losses", 0), info.get("draws", 0)
+    msg = (
+        f"🏆 <b>CAREER PROFILE: {info.get('name')}</b>\n"
+        f"{DIVIDER}\n"
+        f"🥇 <b>Victories:</b> {w}\n"
+        f"💀 <b>Defeats:</b> {l}\n"
+        f"🤝 <b>Draws:</b> {d}\n"
+        f"⚡ <b>Specials Landed:</b> {info.get('specials_successful', 0)}\n"
+        f"{DIVIDER}"
     )
-    await safe_send(update.message.reply_text, txt, parse_mode=PARSE_MODE)
+    await safe_send(update.message.reply_text, msg, parse_mode=PARSE_MODE)
 
 async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
     players = [(info.get("name"), info.get("wins", 0), info.get("losses", 0), info.get("draws", 0))
@@ -414,48 +409,27 @@ async def cmd_leaderboard(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         except Exception:
             pass
-    lines = ["🏆 <b>WWE HALL OF FAME:</b>\n"]
+    lines = [f"👑 <b>WWE HALL OF FAME — TOP 10</b>\n{DIVIDER}\n"]
     for i, (n, w, l, d) in enumerate(sorted_p, start=1):
         lines.append(f"{i}. <b>{n}</b> — {w}W / {l}L / {d}D")
+    lines.append(f"\n{DIVIDER}")
     await safe_send(update.message.reply_text, "\n".join(lines), parse_mode=PARSE_MODE)
 
-async def cmd_checkstats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (update.message.text or "").split()
-    if len(text) < 2:
-        await safe_send(update.message.reply_text, "Usage: /checkstats @username or WrestlerName")
-        return
-    target = text[1].lstrip("@").strip().lower()
-    target_info = None
-    for info in user_stats.values():
-        if info.get("name") and info["name"].lower() == target:
-            target_info = info
-            break
-    if not target_info:
-        await safe_send(update.message.reply_text, f"No superstar found named '{text[1]}'.")
-        return
-    w, l, d = target_info.get("wins", 0), target_info.get("losses", 0), target_info.get("draws", 0)
-    await safe_send(
-        update.message.reply_text,
-        f"🎖️ <b>{target_info.get('name')}</b>:\n{w} Wins | {l} Losses | {d} Draws",
-        parse_mode=PARSE_MODE
-    )
-
-# ---------------- 1V1 MATCH ENGINE ----------------
+# ---------------- 1V1 GRUDGE MATCH ----------------
 async def cmd_startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
-        await safe_send(update.message.reply_text, "Use /startgame inside a group.")
+        await safe_send(update.message.reply_text, "Use /startgame inside a group to challenge others!")
         return
     gid = update.effective_chat.id
-    uid = update.effective_user.id
-    if str(uid) not in user_stats or not user_stats[str(uid)].get("name"):
-        await safe_send(update.message.reply_text, "Register first by sending /start in my private DM.")
-        return
+    user = update.effective_user
+    uid = user.id
+    hname = ensure_user(user)
+
     if gid in games or gid in rumble_games or gid in tag_games:
-        await safe_send(update.message.reply_text, "A brawl is already in progress in this arena!")
+        await safe_send(update.message.reply_text, "⚠️ A brawl is already active in this arena! Finish it first.")
         return
 
     lobbies[gid] = {"host": uid, "players": [uid], "type": "1v1", "message_id": None}
-    hname = user_stats[str(uid)]["name"]
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🥊 Step Into The Ring", callback_data=f"join|{gid}|{uid}")],
         [InlineKeyboardButton("❌ Cancel Match", callback_data=f"cancel_lobby|{gid}|{uid}")]
@@ -463,7 +437,13 @@ async def cmd_startgame(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await safe_send(
         context.bot.send_message,
         chat_id=gid,
-        text=f"🎫 <b>WWE MAIN EVENT CHALLENGE!</b>\n<b>{hname}</b> is standing in the ring waiting for an opponent!\nTap below to accept!",
+        text=(
+            f"🎫 <b>WWE MAIN EVENT CHALLENGE!</b>\n"
+            f"{DIVIDER}\n\n"
+            f"🔥 Superstar <b>{hname}</b> is standing in the ring!\n"
+            f"Who has the guts to accept the challenge?\n\n"
+            f"{DIVIDER}"
+        ),
         parse_mode=PARSE_MODE,
         reply_markup=kb
     )
@@ -476,8 +456,9 @@ async def lobby_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     parts = (query.data or "").split("|")
     if len(parts) != 3:
         return
-    action, gid_s, hid_s = parts
-    gid, hid, uid = int(gid_s), int(hid_s), query.from_user.id
+    action, gid, hid = parts[0], int(parts[1]), int(parts[2])
+    user = query.from_user
+    uid = user.id
 
     lobby = lobbies.get(gid)
     if not lobby or lobby.get("type") != "1v1":
@@ -486,13 +467,12 @@ async def lobby_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if action == "join":
         if uid == hid:
-            await query.answer("You can't challenge yourself!", show_alert=True)
-            return
-        if str(uid) not in user_stats or not user_stats[str(uid)].get("name"):
-            await query.answer("Register first! DM /start to the bot.", show_alert=True)
+            await query.answer("You can't fight yourself! Wait for a challenger.", show_alert=True)
             return
         p1, p2 = hid, uid
-        n1, n2 = user_stats[str(p1)]["name"], user_stats[str(p2)]["name"]
+        n1 = user_stats[str(p1)]["name"]
+        n2 = ensure_user(user)
+
         games[gid] = {
             "players": [p1, p2],
             "names": {str(p1): n1, str(p2): n2},
@@ -507,19 +487,20 @@ async def lobby_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         intro = (
             f"🔔 <b>DING! DING! DING!</b>\n"
-            f"🔥 <b>{n1}</b> vs <b>{n2}</b>\n\n"
+            f"{DIVIDER}\n\n"
+            f"🥊 <b>{n1}</b> vs <b>{n2}</b>\n\n"
             f"{crowd_hype()}\n\n"
-            f"Both gladiators are locked in! Choose your opening strike:"
+            f"{DIVIDER}"
         )
         await safe_send(context.bot.send_message, chat_id=gid, text=intro, parse_mode=PARSE_MODE)
         await send_1v1_move_prompt(gid, context)
 
     elif action == "cancel_lobby":
         if uid != hid:
-            await query.answer("Only the challenger can cancel.", show_alert=True)
+            await query.answer("Only the host can cancel.", show_alert=True)
             return
         del lobbies[gid]
-        await safe_send(context.bot.edit_message_text, chat_id=gid, message_id=lobby["message_id"], text="❌ Challenge cancelled.")
+        await safe_send(context.bot.edit_message_text, chat_id=gid, message_id=lobby["message_id"], text="❌ Match challenge cancelled.")
 
 async def send_1v1_move_prompt(gid: int, context: ContextTypes.DEFAULT_TYPE):
     game = games.get(gid)
@@ -530,10 +511,12 @@ async def send_1v1_move_prompt(gid: int, context: ContextTypes.DEFAULT_TYPE):
     hp1, hp2 = game["hp"][p1], game["hp"][p2]
 
     prompt = (
-        f"⚡ <b>RING COMBAT</b>\n\n"
+        f"⚡ <b>RINGSIDE ACTION</b>\n"
+        f"{DIVIDER}\n\n"
         f"🔴 <b>{n1}</b>\n{hp_bar(hp1)}\n\n"
         f"🔵 <b>{n2}</b>\n{hp_bar(hp2)}\n\n"
-        f"<i>Both superstars, lock in your move:</i>"
+        f"{DIVIDER}\n"
+        f"<i>Both superstars, tap your move below:</i>"
     )
     msg = await safe_send(
         context.bot.send_message,
@@ -554,7 +537,7 @@ async def move_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gid, move, uid = int(parts[1]), parts[2], query.from_user.id
     game = games.get(gid)
     if not game or uid not in game["players"]:
-        await query.answer("You're not in this match!", show_alert=True)
+        await query.answer("You're not a competitor in this match!", show_alert=True)
         return
 
     last_move = game["last_move"].get(uid)
@@ -565,8 +548,7 @@ async def move_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("❌ No reversals left!", show_alert=True)
         return
     if move in ["suplex", "rko", "reversal"] and last_move == move:
-        await query.answer("❌ Can't use the same special/reversal twice in a row!", show_alert=True)
-        await send_short_restriction_dm(context, uid)
+        await query.answer("❌ Can't use the same special/reversal consecutively!", show_alert=True)
         return
 
     game["move_choice"][uid] = move
@@ -585,25 +567,26 @@ async def resolve_1v1_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
     d1, d2 = MOVES[m1]["dmg"], MOVES[m2]["dmg"]
 
     final_d1, final_d2 = d1, d2
-    lines = []
-    lines.append(f"💥 <b>{n1}</b> unleashes <b>{MOVES[m1]['name']}</b>!")
-    lines.append(f"💥 <b>{n2}</b> strikes with <b>{MOVES[m2]['name']}</b>!\n")
+    lines = [
+        f"💥 <b>{n1}</b> strikes with <b>{MOVES[m1]['name']}</b>!",
+        f"💥 <b>{n2}</b> retaliates with <b>{MOVES[m2]['name']}</b>!\n"
+    ]
 
     if m2 == "reversal" and m1 != "reversal":
         final_d1 = 0
         final_d2 = d1
         game["reversals_left"][p2] -= 1
-        lines.append(f"🛡️ <b>{n2} REVERSES!</b> Catches {n1} off balance and smashes them for <b>{final_d2} DMG</b>!")
+        lines.append(f"🛡️ <b>{n2} COUNTERS!</b> Flips {n1} overhead for <b>{final_d2} REFLECTED DMG</b>!")
     elif m1 == "reversal" and m2 != "reversal":
         final_d1 = d2
         final_d2 = 0
         game["reversals_left"][p1] -= 1
-        lines.append(f"🛡️ <b>{n1} REVERSES!</b> Counters {n2}'s assault for <b>{final_d1} DMG</b>!")
+        lines.append(f"🛡️ <b>{n1} COUNTERS!</b> Turns {n2}'s momentum into <b>{final_d1} REFLECTED DMG</b>!")
     elif m1 == "reversal" and m2 == "reversal":
         final_d1, final_d2 = 0, 0
         game["reversals_left"][p1] -= 1
         game["reversals_left"][p2] -= 1
-        lines.append("🛡️ Both superstars attempt counters! They circle each other in a stalemate!")
+        lines.append("🛡️ Both attempt counters! They bounce off the ropes in a stalemate!")
     else:
         if final_d1 > 0:
             lines.append(f"⚡ <b>{n2}</b> takes <b>{final_d1} damage</b>!")
@@ -628,7 +611,8 @@ async def resolve_1v1_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
         await safe_send(context.bot.edit_message_reply_markup, chat_id=gid, message_id=mid, reply_markup=None)
     game["round_msg_ids"] = []
 
-    lines.append(f"\n{crowd_hype()}")
+    lines.append(f"\n{DIVIDER}")
+    lines.append(f"{crowd_hype()}")
     await safe_send(context.bot.send_message, chat_id=gid, text="\n".join(lines), parse_mode=PARSE_MODE)
 
     hp1, hp2 = max(0, game["hp"][p1]), max(0, game["hp"][p2])
@@ -645,40 +629,37 @@ async def end_1v1_match(gid: int, context: ContextTypes.DEFAULT_TYPE):
     hp1, hp2 = max(0, game["hp"][p1]), max(0, game["hp"][p2])
 
     if hp1 <= 0 and hp2 <= 0:
-        res = f"🤝 <b>DOUBLE KNOCKOUT — DRAW!</b>\nNeither <b>{n1}</b> nor <b>{n2}</b> could answer the 10 count!"
+        res = f"🤝 <b>DOUBLE KNOCKOUT — DRAW!</b>\nNeither <b>{n1}</b> nor <b>{n2}</b> could answer the 10-count!"
         user_stats[str(p1)]["draws"] = user_stats[str(p1)].get("draws", 0) + 1
         user_stats[str(p2)]["draws"] = user_stats[str(p2)].get("draws", 0) + 1
     elif hp1 <= 0:
-        res = f"🏆 <b>1... 2... 3! PIN FALL!</b>\n🎉 <b>WINNER: {n2}!</b>\n💀 {n1} is laid out on the canvas!"
+        res = f"🏆 <b>1... 2... 3! PIN FALL!</b>\n🎉 <b>WINNER: {n2}!</b>\n💀 {n1} is laid out flat on the canvas!"
         user_stats[str(p1)]["losses"] = user_stats[str(p1)].get("losses", 0) + 1
         user_stats[str(p2)]["wins"] = user_stats[str(p2)].get("wins", 0) + 1
     else:
-        res = f"🏆 <b>1... 2... 3! PIN FALL!</b>\n🎉 <b>WINNER: {n1}!</b>\n💀 {n2} is laid out on the canvas!"
+        res = f"🏆 <b>1... 2... 3! PIN FALL!</b>\n🎉 <b>WINNER: {n1}!</b>\n💀 {n2} is laid out flat on the canvas!"
         user_stats[str(p1)]["wins"] = user_stats[str(p1)].get("wins", 0) + 1
         user_stats[str(p2)]["losses"] = user_stats[str(p2)].get("losses", 0) + 1
 
     save_stats()
     del games[gid]
-    await safe_send(context.bot.send_message, chat_id=gid, text=res, parse_mode=PARSE_MODE)
+    await safe_send(context.bot.send_message, chat_id=gid, text=f"{DIVIDER}\n{res}\n{DIVIDER}", parse_mode=PARSE_MODE)
 
-# ---------------- 2V2 TAG TEAM WARFARE ----------------
+# ---------------- 2V2 TAG TEAM ----------------
 async def cmd_starttag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         await safe_send(update.message.reply_text, "Use /starttag inside a group.")
         return
     gid = update.effective_chat.id
-    uid = update.effective_user.id
-    if str(uid) not in user_stats or not user_stats[str(uid)].get("name"):
-        await safe_send(update.message.reply_text, "Register first by sending /start to my DM.")
-        return
+    user = update.effective_user
+    uid = user.id
+    hname = ensure_user(user)
+
     if gid in games or gid in rumble_games or gid in tag_games:
-        await safe_send(update.message.reply_text, "A brawl is already active here!")
+        await safe_send(update.message.reply_text, "A brawl is already active in this arena!")
         return
 
-    lobbies[gid] = {
-        "host": uid, "players": [uid], "type": "tag", "max": 4, "message_id": None
-    }
-    hname = user_stats[str(uid)]["name"]
+    lobbies[gid] = {"host": uid, "players": [uid], "type": "tag", "max": 4, "message_id": None}
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("🔵 Join Tag Team (1/4)", callback_data=f"join_tag|{gid}|{uid}")],
         [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_tag_lobby|{gid}|{uid}")]
@@ -686,7 +667,13 @@ async def cmd_starttag(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await safe_send(
         context.bot.send_message,
         chat_id=gid,
-        text=f"🏟️ <b>2v2 TAG TEAM WARFARE OPENED!</b>\nHost: <b>{hname}</b>\nTap below to claim a corner! (4 superstars needed)",
+        text=(
+            f"🏟️ <b>2v2 TAG TEAM WARFARE OPENED!</b>\n"
+            f"{DIVIDER}\n\n"
+            f"Host: <b>{hname}</b>\n"
+            f"Need 4 superstars. Tap below to claim a corner!\n\n"
+            f"{DIVIDER}"
+        ),
         parse_mode=PARSE_MODE,
         reply_markup=kb
     )
@@ -700,7 +687,8 @@ async def tag_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if len(parts) != 3:
         return
     action, gid, hid = parts[0], int(parts[1]), int(parts[2])
-    uid = query.from_user.id
+    user = query.from_user
+    uid = user.id
 
     lobby = lobbies.get(gid)
     if not lobby or lobby.get("type") != "tag":
@@ -708,11 +696,9 @@ async def tag_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
 
     if action == "join_tag":
-        if str(uid) not in user_stats or not user_stats[str(uid)].get("name"):
-            await query.answer("Register first! DM /start to the bot.", show_alert=True)
-            return
+        ensure_user(user)
         if uid in lobby["players"]:
-            await query.answer("You already joined!", show_alert=True)
+            await query.answer("You are already in this lobby!", show_alert=True)
             return
         lobby["players"].append(uid)
         count = len(lobby["players"])
@@ -726,7 +712,7 @@ async def tag_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 context.bot.edit_message_text,
                 chat_id=gid,
                 message_id=lobby["message_id"],
-                text=f"🏟️ <b>TAG TEAM LOBBY</b> ({count}/4)\n" + "\n".join([f"• {n}" for n in names]),
+                text=f"🏟️ <b>TAG TEAM LOBBY</b> ({count}/4)\n{DIVIDER}\n" + "\n".join([f"• <b>{n}</b>" for n in names]) + f"\n{DIVIDER}",
                 parse_mode=PARSE_MODE,
                 reply_markup=kb
             )
@@ -748,11 +734,13 @@ async def tag_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
             }
             n = tag_games[gid]["names"]
             intro = (
-                f"🔔 <b>TAG TEAM TORNADO STARTS!</b>\n\n"
+                f"🔔 <b>TAG TEAM TORNADO STARTS!</b>\n"
+                f"{DIVIDER}\n\n"
                 f"🔴 <b>TEAM RED:</b> {n[str(p1)]} & {n[str(p2)]}\n"
                 f"🔵 <b>TEAM BLUE:</b> {n[str(p3)]} & {n[str(p4)]}\n\n"
-                f"In the ring right now: <b>{n[str(p1)]}</b> vs <b>{n[str(p3)]}</b>!\n"
-                f"{crowd_hype()}"
+                f"Legal men in ring: <b>{n[str(p1)]}</b> vs <b>{n[str(p3)]}</b>!\n"
+                f"{crowd_hype()}\n\n"
+                f"{DIVIDER}"
             )
             await safe_send(context.bot.send_message, chat_id=gid, text=intro, parse_mode=PARSE_MODE)
             await send_tag_move_prompt(gid, context)
@@ -776,12 +764,14 @@ async def send_tag_move_prompt(gid: int, context: ContextTypes.DEFAULT_TYPE):
     partner2 = [p for p in game["team2"] if p != a2][0]
 
     prompt = (
-        f"⚡ <b>TAG TEAM IN RING BATTLE</b>\n\n"
+        f"⚡ <b>TAG TEAM WARFARE</b>\n"
+        f"{DIVIDER}\n\n"
         f"🔴 <b>LEGAL: {n1}</b>\n{hp_bar(hp1)}\n"
         f"↳ <i>Apron: {game['names'][str(partner1)]} ({game['hp'][partner1]} HP)</i>\n\n"
         f"🔵 <b>LEGAL: {n2}</b>\n{hp_bar(hp2)}\n"
         f"↳ <i>Apron: {game['names'][str(partner2)]} ({game['hp'][partner2]} HP)</i>\n\n"
-        f"<i>Active superstars, pick your move or tag your partner!</i>"
+        f"{DIVIDER}\n"
+        f"<i>Active superstars, pick your move or tag out:</i>"
     )
     msg = await safe_send(
         context.bot.send_message,
@@ -804,7 +794,7 @@ async def tag_move_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not game:
         return
     if uid not in [game["active1"], game["active2"]]:
-        await query.answer("You are currently on the apron! Wait for a tag.", show_alert=True)
+        await query.answer("You are on the apron! Wait for your partner to tag you.", show_alert=True)
         return
 
     if move in ["suplex", "rko"] and game["specials"][uid] <= 0:
@@ -815,7 +805,6 @@ async def tag_move_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     if move in ["suplex", "rko", "reversal"] and game["last_move"].get(uid) == move:
         await query.answer("Can't use the same special/reversal consecutively!", show_alert=True)
-        await send_short_restriction_dm(context, uid)
         return
 
     game["move_choice"][uid] = move
@@ -843,15 +832,11 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
             lines.append(f"🔄 <b>{n1} TAGS OUT!</b> <b>{game['names'][str(partner1)]}</b> sprints into the ring!")
             game["active1"] = partner1
             tagged1 = True
-        else:
-            lines.append(f"⚠️ {n1} tried to tag, but partner is already eliminated!")
     if m2 == "tag":
         if game["hp"][partner2] > 0:
             lines.append(f"🔄 <b>{n2} TAGS OUT!</b> <b>{game['names'][str(partner2)]}</b> enters the ring!")
             game["active2"] = partner2
             tagged2 = True
-        else:
-            lines.append(f"⚠️ {n2} tried to tag, but partner is already eliminated!")
 
     if not tagged1 and not tagged2:
         d1, d2 = MOVES[m1]["dmg"], MOVES[m2]["dmg"]
@@ -868,7 +853,7 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
         else:
             game["hp"][a2] -= d1
             game["hp"][a1] -= d2
-            lines.append(f"💥 <b>{n1}</b> hits {m1.upper()} for {d1} DMG!")
+            lines.append(f"💥 <b>{n1}</b> lands {m1.upper()} for {d1} DMG!")
             lines.append(f"💥 <b>{n2}</b> connects {m2.upper()} for {d2} DMG!")
 
     for mid in game.get("round_msg_ids", []):
@@ -885,7 +870,7 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
                 else:
                     game["active2"] = t_partner
 
-    lines.append(f"\n{crowd_hype()}")
+    lines.append(f"\n{DIVIDER}\n{crowd_hype()}")
     await safe_send(context.bot.send_message, chat_id=gid, text="\n".join(lines), parse_mode=PARSE_MODE)
 
     team1_dead = all(game["hp"][p] <= 0 for p in game["team1"])
@@ -917,24 +902,21 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
         await asyncio.sleep(2)
         await send_tag_move_prompt(gid, context)
 
-# ---------------- ROYAL RUMBLE (4-8 PLAYERS) ----------------
+# ---------------- ROYAL RUMBLE ----------------
 async def cmd_startrumble(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type == "private":
         await safe_send(update.message.reply_text, "Use /startrumble inside a group.")
         return
     gid = update.effective_chat.id
-    uid = update.effective_user.id
-    if str(uid) not in user_stats or not user_stats[str(uid)].get("name"):
-        await safe_send(update.message.reply_text, "Register first by sending /start in my private DM.")
-        return
+    user = update.effective_user
+    uid = user.id
+    hname = ensure_user(user)
+
     if gid in games or gid in rumble_games or gid in tag_games:
         await safe_send(update.message.reply_text, "A brawl is already active in this arena.")
         return
 
-    lobbies[gid] = {
-        "host": uid, "players": [uid], "type": "rumble", "max": RUMBLE_MAX_PLAYERS, "message_id": None
-    }
-    hname = user_stats[str(uid)]["name"]
+    lobbies[gid] = {"host": uid, "players": [uid], "type": "rumble", "max": RUMBLE_MAX_PLAYERS, "message_id": None}
     kb = InlineKeyboardMarkup([
         [InlineKeyboardButton("👑 Enter Royal Rumble (1/8)", callback_data=f"join_rumble|{gid}|{uid}")],
         [InlineKeyboardButton("❌ Cancel", callback_data=f"cancel_rumble_lobby|{gid}|{uid}")]
@@ -942,7 +924,13 @@ async def cmd_startrumble(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = await safe_send(
         context.bot.send_message,
         chat_id=gid,
-        text=f"👑 <b>ROYAL RUMBLE LOBBY OPENED!</b>\nHost: <b>{hname}</b>\nNeeded: 4 to 8 wrestlers. Tap below to draw your entry number!",
+        text=(
+            f"👑 <b>ROYAL RUMBLE LOBBY OPENED!</b>\n"
+            f"{DIVIDER}\n\n"
+            f"Host: <b>{hname}</b>\n"
+            f"Needs 4 to 8 superstars. Tap below to draw your number!\n\n"
+            f"{DIVIDER}"
+        ),
         parse_mode=PARSE_MODE,
         reply_markup=kb
     )
@@ -956,7 +944,8 @@ async def rumble_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if len(parts) != 3:
         return
     action, gid, hid = parts[0], int(parts[1]), int(parts[2])
-    uid = query.from_user.id
+    user = query.from_user
+    uid = user.id
 
     lobby = lobbies.get(gid)
     if not lobby or lobby.get("type") != "rumble":
@@ -964,14 +953,12 @@ async def rumble_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if action == "join_rumble":
-        if str(uid) not in user_stats or not user_stats[str(uid)].get("name"):
-            await query.answer("Register first! DM /start to the bot.", show_alert=True)
-            return
+        ensure_user(user)
         if uid in lobby["players"]:
-            await query.answer("You're already in the rumble!", show_alert=True)
+            await query.answer("You're already entered in the Rumble!", show_alert=True)
             return
         if len(lobby["players"]) >= RUMBLE_MAX_PLAYERS:
-            await query.answer("Rumble is full!", show_alert=True)
+            await query.answer("Royal Rumble is completely full!", show_alert=True)
             return
         lobby["players"].append(uid)
         count = len(lobby["players"])
@@ -985,14 +972,14 @@ async def rumble_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TY
             context.bot.edit_message_text,
             chat_id=gid,
             message_id=lobby["message_id"],
-            text=f"👑 <b>ROYAL RUMBLE ENTRIES</b> ({count}/{RUMBLE_MAX_PLAYERS}):\n" + "\n".join([f"• #{i} {n}" for i, n in enumerate(names, 1)]),
+            text=f"👑 <b>ROYAL RUMBLE ENTRIES</b> ({count}/{RUMBLE_MAX_PLAYERS}):\n{DIVIDER}\n" + "\n".join([f"• #{i} <b>{n}</b>" for i, n in enumerate(names, 1)]) + f"\n{DIVIDER}",
             parse_mode=PARSE_MODE,
             reply_markup=InlineKeyboardMarkup(kb_rows)
         )
 
     elif action == "start_rumble":
         if uid != hid:
-            await query.answer("Only host can start!", show_alert=True)
+            await query.answer("Only the host can start!", show_alert=True)
             return
         wrestlers = lobby["players"].copy()
         del lobbies[gid]
@@ -1011,14 +998,14 @@ async def rumble_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TY
         await safe_send(
             context.bot.send_message,
             chat_id=gid,
-            text=f"🚨 <b>THE BUZZER SOUNDS! 3... 2... 1!</b>\n👑 <b>ROYAL RUMBLE IS UNDERWAY!</b>\nLast superstar inside the ring wins!",
+            text=f"🚨 <b>THE BUZZER SOUNDS! 3... 2... 1!</b>\n👑 <b>ROYAL RUMBLE IS UNDERWAY!</b>\nLast superstar standing wins!",
             parse_mode=PARSE_MODE
         )
         await start_rumble_round(gid, context)
 
     elif action == "cancel_rumble_lobby":
         if uid != hid:
-            await query.answer("Only host can cancel.", show_alert=True)
+            await query.answer("Only the host can cancel.", show_alert=True)
             return
         del lobbies[gid]
         await safe_send(context.bot.edit_message_text, chat_id=gid, message_id=lobby["message_id"], text="❌ Rumble cancelled.")
@@ -1034,9 +1021,11 @@ async def start_rumble_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
     game["choices"] = {}
     status = [f"🤼 <b>{game['names'][str(w)]}</b>\n{hp_bar(game['hp'][w], RUMBLE_HP)}" for w in game["active"]]
     txt = (
-        f"⚡ <b>ROYAL RUMBLE — ROUND {game['round']}</b>\n\n" +
+        f"⚡ <b>ROYAL RUMBLE — ROUND {game['round']}</b>\n"
+        f"{DIVIDER}\n\n" +
         "\n\n".join(status) +
-        f"\n\n🥊 <i>All active superstars, select your move:</i>"
+        f"\n\n{DIVIDER}\n"
+        f"🥊 <i>All active superstars, select your move:</i>"
     )
     msg = await safe_send(
         context.bot.send_message,
@@ -1068,7 +1057,6 @@ async def rumble_move_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         return
     if move in ["suplex", "rko", "reversal"] and game["last_move"].get(uid) == move:
         await query.answer("Can't use the same special/reversal consecutively!", show_alert=True)
-        await send_short_restriction_dm(context, uid)
         return
 
     if move == "reversal":
@@ -1079,57 +1067,13 @@ async def rumble_move_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             await resolve_rumble_round(gid, context)
         return
 
+    # Auto-target highest HP opponent or allow DM selection
     opponents = [w for w in game["active"] if w != uid]
-    cid = f"{uid}_{move}_{random.randint(100, 999)}"
-    rumble_target_choices[cid] = {"uid": uid, "gid": gid, "move": move, "opponents": opponents}
+    target_opponent = max(opponents, key=lambda w: game["hp"][w])
 
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton(game["names"][str(op)], callback_data=f"rumble_target|{cid}|{op}")]
-        for op in opponents
-    ])
-    dm_sent = await safe_send(
-        context.bot.send_message,
-        chat_id=uid,
-        text=f"🎯 <b>Pick your target for {MOVES[move]['name']}!</b>",
-        parse_mode=PARSE_MODE,
-        reply_markup=kb
-    )
-    if dm_sent:
-        await query.answer(f"Check your DM to select target for {move.upper()}!")
-    else:
-        await query.answer("⚠️ Open DM with me first (send /start in DM) so I can send the target menu!", show_alert=True)
-
-async def rumble_target_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    parts = (query.data or "").split("|")
-    if len(parts) != 3:
-        return
-    cid, target_id = parts[1], int(parts[2])
-    data = rumble_target_choices.get(cid)
-    if not data:
-        await query.answer("Target choice expired.", show_alert=True)
-        return
-
-    uid, gid, move = data["uid"], data["gid"], data["move"]
-    if query.from_user.id != uid:
-        return
-    game = rumble_games.get(gid)
-    if not game or uid not in game["active"]:
-        return
-
-    game["choices"][uid] = {"move": move, "target": target_id}
+    game["choices"][uid] = {"move": move, "target": target_opponent}
     game["last_move"][uid] = move
-    del rumble_target_choices[cid]
-
-    tname = game["names"][str(target_id)]
-    await safe_send(
-        context.bot.edit_message_text,
-        chat_id=uid,
-        message_id=query.message.message_id,
-        text=f"✅ Target locked: <b>{tname}</b> with <b>{MOVES[move]['name']}</b>!",
-        parse_mode=PARSE_MODE
-    )
+    await query.answer(f"Locked: {move.upper()} on {game['names'][str(target_opponent)]}!")
 
     if len(game["choices"]) == len(game["active"]):
         await resolve_rumble_round(gid, context)
@@ -1137,11 +1081,10 @@ async def rumble_target_callback(update: Update, context: ContextTypes.DEFAULT_T
 async def resolve_rumble_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
     game = rumble_games[gid]
     active = game["active"]
-    lines = [f"⚡ <b>RUMBLE ROUND {game['round']} RESOLUTION:</b>\n"]
+    lines = [f"⚡ <b>RUMBLE ROUND {game['round']} CLASH:</b>\n{DIVIDER}\n"]
 
     damage_taken = {w: 0 for w in active}
 
-    # Consume 1 reversal only for players using reversal this round
     for w in active:
         if game["choices"].get(w, {}).get("move") == "reversal":
             game["reversals"][w] -= 1
@@ -1162,7 +1105,7 @@ async def resolve_rumble_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
 
         if game["choices"].get(tgt, {}).get("move") == "reversal":
             damage_taken[attacker] += dmg
-            lines.append(f"🛡️ <b>{tname} REVERSES {aname}'s {mv.upper()}!</b> {aname} takes {dmg} DMG!")
+            lines.append(f"🛡️ <b>{tname} COUNTERS {aname}'s {mv.upper()}!</b> {aname} takes {dmg} DMG!")
         else:
             damage_taken[tgt] += dmg
             lines.append(f"💥 <b>{aname}</b> strikes <b>{tname}</b> with {mv.upper()} for {dmg} DMG!")
@@ -1187,7 +1130,8 @@ async def resolve_rumble_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
         await safe_send(context.bot.edit_message_reply_markup, chat_id=gid, message_id=mid, reply_markup=None)
     game["round_msg_ids"] = []
 
-    lines.append(f"\n{crowd_hype()}")
+    lines.append(f"\n{DIVIDER}")
+    lines.append(f"{crowd_hype()}")
     await safe_send(context.bot.send_message, chat_id=gid, text="\n".join(lines), parse_mode=PARSE_MODE)
 
     if len(game["active"]) <= 1:
@@ -1205,7 +1149,7 @@ async def end_royal_rumble(gid: int, context: ContextTypes.DEFAULT_TYPE):
         txt = (
             f"👑 <b>ROYAL RUMBLE WINNER!</b>\n\n"
             f"🎉 <b>{wname}</b> is the LAST SUPERSTAR STANDING!\n"
-            f"Guaranteed headline spot at WrestleMania!\n\n"
+            f"Headlining WrestleMania!\n\n"
             f"{crowd_hype()}"
         )
         user_stats[str(winner)]["wins"] = user_stats[str(winner)].get("wins", 0) + 1
@@ -1213,19 +1157,16 @@ async def end_royal_rumble(gid: int, context: ContextTypes.DEFAULT_TYPE):
             if w != winner:
                 user_stats[str(w)]["losses"] = user_stats[str(w)].get("losses", 0) + 1
     else:
-        txt = "🤝 <b>ROYAL RUMBLE DRAW! All remaining superstars were eliminated!</b>"
+        txt = "🤝 <b>ROYAL RUMBLE DRAW! All remaining wrestlers were eliminated together!</b>"
         for w in game["wrestlers"]:
             user_stats[str(w)]["draws"] = user_stats[str(w)].get("draws", 0) + 1
 
     save_stats()
     del rumble_games[gid]
-    await safe_send(context.bot.send_message, chat_id=gid, text=txt, parse_mode=PARSE_MODE)
+    await safe_send(context.bot.send_message, chat_id=gid, text=f"{DIVIDER}\n{txt}\n{DIVIDER}", parse_mode=PARSE_MODE)
 
 # ---------------- FORFEIT & ENDMATCH ----------------
 async def cmd_forfeit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type != "private":
-        await safe_send(update.message.reply_text, "Use /forfeit in my private DM.")
-        return
     uid = update.effective_user.id
     target_gid = None
     for gid, g in games.items():
@@ -1244,8 +1185,8 @@ async def cmd_forfeit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_stats[str(uid)]["losses"] = user_stats[str(uid)].get("losses", 0) + 1
     save_stats()
     del games[target_gid]
-    await safe_send(update.message.reply_text, "You tapped out and forfeited the match.")
-    await safe_send(context.bot.send_message, chat_id=target_gid, text=f"⏹️ <b>{lname} threw in the towel!</b>\n🏆 <b>WINNER BY FORFEIT: {wname}!</b>", parse_mode=PARSE_MODE)
+    await safe_send(update.message.reply_text, "You forfeited the match.")
+    await safe_send(context.bot.send_message, chat_id=target_gid, text=f"⏹️ <b>{lname} threw in the towel!</b>\n🏆 <b>WINNER: {wname}!</b>", parse_mode=PARSE_MODE)
 
 async def cmd_endmatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gid = update.effective_chat.id
@@ -1254,21 +1195,21 @@ async def cmd_endmatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await safe_send(update.message.reply_text, "No active match here.")
         return
     if uid not in games[gid]["players"]:
-        await safe_send(update.message.reply_text, "Only combatants can call for a stoppage.")
+        await safe_send(update.message.reply_text, "Only match competitors can stop the match.")
         return
     del games[gid]
-    await safe_send(update.message.reply_text, "⏹️ <b>Match ended by mutual referee stoppage!</b>", parse_mode=PARSE_MODE)
+    await safe_send(update.message.reply_text, "⏹️ <b>Match ended by referee stoppage!</b>", parse_mode=PARSE_MODE)
 
-# ---------------- LIGHTWEIGHT WEB SERVER FOR 24/7 HOSTING ----------------
+# ---------------- LIGHTWEIGHT KEEPALIVE WEB SERVER ----------------
 class PingHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain; charset=utf-8")
         self.end_headers()
-        self.wfile.write("HOMIES WWE BOT IS RUNNING 24/7 🔥".encode("utf-8"))
+        self.wfile.write("WWE BRAWL BOT 24/7 ONLINE 🔥".encode("utf-8"))
 
     def log_message(self, format, *args):
-        return  # Suppress console log spam
+        return
 
 def run_keepalive_server():
     try:
@@ -1278,13 +1219,12 @@ def run_keepalive_server():
     except Exception as e:
         logger.error("Health server error: %s", e)
 
-# ---------------- BOT INITIALIZATION ----------------
+# ---------------- INITIALIZATION ----------------
 def main():
     if not BOT_TOKEN:
         logger.error("No BOT_TOKEN found.")
         return
 
-    # Build Telegram Bot
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     # Commands
@@ -1292,7 +1232,6 @@ def main():
     app.add_handler(CommandHandler("startcareer", cmd_startcareer))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("stats", cmd_stats))
-    app.add_handler(CommandHandler("checkstats", cmd_checkstats))
     app.add_handler(CommandHandler("leaderboard", cmd_leaderboard))
     app.add_handler(CommandHandler("startgame", cmd_startgame))
     app.add_handler(CommandHandler("starttag", cmd_starttag))
@@ -1307,16 +1246,11 @@ def main():
     app.add_handler(CallbackQueryHandler(tag_move_callback, pattern=r"^tag_move\|"))
     app.add_handler(CallbackQueryHandler(rumble_lobby_callback, pattern=r"^(join_rumble|cancel_rumble_lobby|start_rumble)\|"))
     app.add_handler(CallbackQueryHandler(rumble_move_callback, pattern=r"^rumble_move\|"))
-    app.add_handler(CallbackQueryHandler(rumble_target_callback, pattern=r"^rumble_target\|"))
 
-    # Private text handler
-    app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, private_text_handler))
+    # Background ping server for 24/7 hosting
+    threading.Thread(target=run_keepalive_server, daemon=True).start()
 
-    # Launch background keepalive HTTP ping server in a separate thread
-    server_thread = threading.Thread(target=run_keepalive_server, daemon=True)
-    server_thread.start()
-
-    logger.info("⚡ WWE CYBER ARENA BOT IS LIVE!")
+    logger.info("⚡ WWE ARENA BOT IS LIVE 24/7!")
     app.run_polling()
 
 if __name__ == "__main__":
