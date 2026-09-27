@@ -5,7 +5,7 @@ HOMIES WWE CYBER-BRAWL BOT
 - 2v2 Tag Team Warfare (with live Tag mechanics)
 - 4-8 Player Royal Rumble (last wrestler standing)
 - Visual Retro HP Bars & Announcer Commentary
-- Embedded Web Keepalive for 24/7 Free Hosting
+- Embedded Keepalive HTTP Server for 24/7 Free Cloud Hosting (Render/Koyeb)
 """
 
 import os
@@ -15,8 +15,9 @@ import random
 import io
 import asyncio
 import re
-from typing import Dict, List, Tuple, Optional
-from aiohttp import web
+import threading
+from typing import Dict, List, Tuple
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, InputFile
 from telegram.error import TimedOut, TelegramError, BadRequest, RetryAfter
@@ -25,7 +26,7 @@ from telegram.ext import (
     MessageHandler, ContextTypes, filters
 )
 
-# Pillow for cards
+# Pillow for card generation
 try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
@@ -108,7 +109,7 @@ def hp_bar(current: int, max_hp: int = MAX_HP, length: int = 10) -> str:
     current = max(0, current)
     ratio = current / max_hp
     filled = int(round(ratio * length))
-    empty = length - filled
+    empty = max(0, length - filled)
     if ratio > 0.55:
         icon = "🟩"
     elif ratio > 0.25:
@@ -592,7 +593,7 @@ async def resolve_1v1_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
         final_d1 = 0
         final_d2 = d1
         game["reversals_left"][p2] -= 1
-        lines.append(f"🛡️ <b>{n2} REVERSES!</b> Catches {n1} off balance and smashes them with their own power for <b>{final_d2} DMG</b>!")
+        lines.append(f"🛡️ <b>{n2} REVERSES!</b> Catches {n1} off balance and smashes them for <b>{final_d2} DMG</b>!")
     elif m1 == "reversal" and m2 != "reversal":
         final_d1 = d2
         final_d2 = 0
@@ -730,7 +731,6 @@ async def tag_lobby_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 reply_markup=kb
             )
         else:
-            # Start Tag Team Match
             p1, p2, p3, p4 = lobby["players"]
             del lobbies[gid]
             tag_games[gid] = {
@@ -772,7 +772,6 @@ async def send_tag_move_prompt(gid: int, context: ContextTypes.DEFAULT_TYPE):
     n1, n2 = game["names"][str(a1)], game["names"][str(a2)]
     hp1, hp2 = game["hp"][a1], game["hp"][a2]
 
-    # Partner info
     partner1 = [p for p in game["team1"] if p != a1][0]
     partner2 = [p for p in game["team2"] if p != a2][0]
 
@@ -833,7 +832,6 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
     n1, n2 = game["names"][str(a1)], game["names"][str(a2)]
     lines = []
 
-    # Handle tags first
     partner1 = [p for p in game["team1"] if p != a1][0]
     partner2 = [p for p in game["team2"] if p != a2][0]
 
@@ -846,26 +844,25 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
             game["active1"] = partner1
             tagged1 = True
         else:
-            lines.append(f"⚠️ {n1} tried to tag, but their partner is already eliminated!")
+            lines.append(f"⚠️ {n1} tried to tag, but partner is already eliminated!")
     if m2 == "tag":
         if game["hp"][partner2] > 0:
-            lines.append(f"🔄 <b>{n2} TAGS OUT!</b> <b>{game['names'][str(partner2)]}</b> enters the fray!")
+            lines.append(f"🔄 <b>{n2} TAGS OUT!</b> <b>{game['names'][str(partner2)]}</b> enters the ring!")
             game["active2"] = partner2
             tagged2 = True
         else:
-            lines.append(f"⚠️ {n2} tried to tag, but their partner is already eliminated!")
+            lines.append(f"⚠️ {n2} tried to tag, but partner is already eliminated!")
 
-    # If neither tagged, standard clash
     if not tagged1 and not tagged2:
         d1, d2 = MOVES[m1]["dmg"], MOVES[m2]["dmg"]
         if m2 == "reversal" and m1 != "reversal":
             game["hp"][a1] -= d1
             game["reversals"][a2] -= 1
-            lines.append(f"🛡️ <b>{n2} reverses {n1}'s {m1}!</b> {n1} suffers {d1} self-damage!")
+            lines.append(f"🛡️ <b>{n2} reverses {n1}'s {m1}!</b> {n1} takes {d1} counter-damage!")
         elif m1 == "reversal" and m2 != "reversal":
             game["hp"][a2] -= d2
             game["reversals"][a1] -= 1
-            lines.append(f"🛡️ <b>{n1} reverses {n2}'s {m2}!</b> {n2} suffers {d2} self-damage!")
+            lines.append(f"🛡️ <b>{n1} reverses {n2}'s {m2}!</b> {n2} takes {d2} counter-damage!")
         elif m1 == "reversal" and m2 == "reversal":
             lines.append("🛡️ Both attempt reversals! No damage dealt!")
         else:
@@ -878,12 +875,11 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
         await safe_send(context.bot.edit_message_reply_markup, chat_id=gid, message_id=mid, reply_markup=None)
     game["round_msg_ids"] = []
 
-    # Check eliminations
     for t_active, t_partner, t_num in [(game["active1"], partner1, 1), (game["active2"], partner2, 2)]:
         if game["hp"][t_active] <= 0:
             lines.append(f"💀 <b>{game['names'][str(t_active)]} is ELIMINATED!</b>")
             if game["hp"][t_partner] > 0:
-                lines.append(f"🚨 <b>{game['names'][str(t_partner)]}</b> is forced to step up as the last hope!")
+                lines.append(f"🚨 <b>{game['names'][str(t_partner)]}</b> enters the ring as the last hope!")
                 if t_num == 1:
                     game["active1"] = t_partner
                 else:
@@ -892,16 +888,15 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
     lines.append(f"\n{crowd_hype()}")
     await safe_send(context.bot.send_message, chat_id=gid, text="\n".join(lines), parse_mode=PARSE_MODE)
 
-    # Check team wipes
     team1_dead = all(game["hp"][p] <= 0 for p in game["team1"])
     team2_dead = all(game["hp"][p] <= 0 for p in game["team2"])
 
     if team1_dead and team2_dead:
-        await safe_send(context.bot.send_message, chat_id=gid, text="🤝 <b>TAG TEAM DRAW! Both teams wiped out!</b>", parse_mode=PARSE_MODE)
+        await safe_send(context.bot.send_message, chat_id=gid, text="🤝 <b>TAG TEAM DRAW! Both teams eliminated!</b>", parse_mode=PARSE_MODE)
         del tag_games[gid]
     elif team1_dead:
         w1, w2 = game["names"][str(game["team2"][0])], game["names"][str(game["team2"][1])]
-        await safe_send(context.bot.send_message, chat_id=gid, text=f"🏆 <b>TEAM BLUE WINS!</b>\nSuperstars <b>{w1}</b> & <b>{w2}</b> take home the championship belts!", parse_mode=PARSE_MODE)
+        await safe_send(context.bot.send_message, chat_id=gid, text=f"🏆 <b>TEAM BLUE WINS!</b>\nSuperstars <b>{w1}</b> & <b>{w2}</b> take home the belts!", parse_mode=PARSE_MODE)
         for p in game["team2"]:
             user_stats[str(p)]["wins"] = user_stats[str(p)].get("wins", 0) + 1
         for p in game["team1"]:
@@ -910,7 +905,7 @@ async def resolve_tag_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
         del tag_games[gid]
     elif team2_dead:
         w1, w2 = game["names"][str(game["team1"][0])], game["names"][str(game["team1"][1])]
-        await safe_send(context.bot.send_message, chat_id=gid, text=f"🏆 <b>TEAM RED WINS!</b>\nSuperstars <b>{w1}</b> & <b>{w2}</b> stand tall!", parse_mode=PARSE_MODE)
+        await safe_send(context.bot.send_message, chat_id=gid, text=f"🏆 <b>TEAM RED WINS!</b>\nSuperstars <b>{w1}</b> & <b>{w2}</b> stand victorious!", parse_mode=PARSE_MODE)
         for p in game["team1"]:
             user_stats[str(p)]["wins"] = user_stats[str(p)].get("wins", 0) + 1
         for p in game["team2"]:
@@ -1102,8 +1097,7 @@ async def rumble_move_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     if dm_sent:
         await query.answer(f"Check your DM to select target for {move.upper()}!")
     else:
-        # User hasn't started DM with bot
-        await query.answer("⚠️ Please open DM with me first (t.me/YourBot) so I can send the target menu!", show_alert=True)
+        await query.answer("⚠️ Open DM with me first (send /start in DM) so I can send the target menu!", show_alert=True)
 
 async def rumble_target_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1147,7 +1141,7 @@ async def resolve_rumble_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
 
     damage_taken = {w: 0 for w in active}
 
-    # Deduct 1 reversal for each player who selected reversal this round
+    # Consume 1 reversal only for players using reversal this round
     for w in active:
         if game["choices"].get(w, {}).get("move") == "reversal":
             game["reversals"][w] -= 1
@@ -1166,13 +1160,12 @@ async def resolve_rumble_round(gid: int, context: ContextTypes.DEFAULT_TYPE):
             game["specials"][attacker] -= 1
             user_stats[str(attacker)]["specials_used"] = user_stats[str(attacker)].get("specials_used", 0) + 1
 
-        # Check if target used reversal
         if game["choices"].get(tgt, {}).get("move") == "reversal":
             damage_taken[attacker] += dmg
-            lines.append(f"🛡️ <b>{tname} REVERSES {aname}'s {mv.upper()}!</b> {aname} is tossed across the ring for {dmg} DMG!")
+            lines.append(f"🛡️ <b>{tname} REVERSES {aname}'s {mv.upper()}!</b> {aname} takes {dmg} DMG!")
         else:
             damage_taken[tgt] += dmg
-            lines.append(f"💥 <b>{aname}</b> crashes into <b>{tname}</b> with {mv.upper()} for {dmg} DMG!")
+            lines.append(f"💥 <b>{aname}</b> strikes <b>{tname}</b> with {mv.upper()} for {dmg} DMG!")
             if mv in ["suplex", "rko"]:
                 user_stats[str(attacker)]["specials_successful"] = user_stats[str(attacker)].get("specials_successful", 0) + 1
 
@@ -1220,7 +1213,7 @@ async def end_royal_rumble(gid: int, context: ContextTypes.DEFAULT_TYPE):
             if w != winner:
                 user_stats[str(w)]["losses"] = user_stats[str(w)].get("losses", 0) + 1
     else:
-        txt = "🤝 <b>ROYAL RUMBLE DRAW! All remaining superstars hit the floor together!</b>"
+        txt = "🤝 <b>ROYAL RUMBLE DRAW! All remaining superstars were eliminated!</b>"
         for w in game["wrestlers"]:
             user_stats[str(w)]["draws"] = user_stats[str(w)].get("draws", 0) + 1
 
@@ -1240,7 +1233,7 @@ async def cmd_forfeit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_gid = gid
             break
     if not target_gid:
-        await safe_send(update.message.reply_text, "You are not in any 1v1 match.")
+        await safe_send(update.message.reply_text, "You are not in any active 1v1 match.")
         return
     g = games[target_gid]
     p1, p2 = g["players"]
@@ -1267,18 +1260,23 @@ async def cmd_endmatch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await safe_send(update.message.reply_text, "⏹️ <b>Match ended by mutual referee stoppage!</b>", parse_mode=PARSE_MODE)
 
 # ---------------- LIGHTWEIGHT WEB SERVER FOR 24/7 HOSTING ----------------
-async def handle_ping(request):
-    return web.Response(text="HOMIES WWE BOT IS RUNNING 24/7 🔥")
+class PingHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write("HOMIES WWE BOT IS RUNNING 24/7 🔥".encode("utf-8"))
 
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle_ping)
-    app.router.add_get("/health", handle_ping)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", PORT)
-    await site.start()
-    logger.info("Web health server listening on port %s", PORT)
+    def log_message(self, format, *args):
+        return  # Suppress console log spam
+
+def run_keepalive_server():
+    try:
+        server = HTTPServer(("0.0.0.0", PORT), PingHandler)
+        logger.info("Web health server listening on port %s", PORT)
+        server.serve_forever()
+    except Exception as e:
+        logger.error("Health server error: %s", e)
 
 # ---------------- BOT INITIALIZATION ----------------
 def main():
@@ -1314,9 +1312,9 @@ def main():
     # Private text handler
     app.add_handler(MessageHandler(filters.TEXT & filters.ChatType.PRIVATE, private_text_handler))
 
-    # Launch background keepalive HTTP ping server
-    loop = asyncio.get_event_loop()
-    loop.create_task(start_web_server())
+    # Launch background keepalive HTTP ping server in a separate thread
+    server_thread = threading.Thread(target=run_keepalive_server, daemon=True)
+    server_thread.start()
 
     logger.info("⚡ WWE CYBER ARENA BOT IS LIVE!")
     app.run_polling()
